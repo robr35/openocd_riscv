@@ -75,9 +75,11 @@ struct vexriscv_common {
     uint32_t jtagRspInstruction;
     uint32_t jtagRspHeader;
     uint32_t jtagRspHeaderSize;
+    uint32_t jtagRspIgnoreSize;
     uint32_t jtagCmdInstruction;
     uint32_t jtagCmdHeader;
     uint32_t jtagCmdHeaderSize;
+    uint32_t jtagCmdIgnoreSize;
 };
 
 static inline struct vexriscv_common *
@@ -218,7 +220,8 @@ static int vexriscv_target_create(struct target *target, Jim_Interp *interp)
     vexriscv->jtagRspHeader = 0;
     vexriscv->jtagCmdHeaderSize = 0;
     vexriscv->jtagRspHeaderSize = 0;
-
+    vexriscv->jtagCmdIgnoreSize = 0;
+    vexriscv->jtagRspIgnoreSize = 0;
 
     vexriscv->useTCP = 0;
 	vexriscv->targetAddress = "127.0.0.1";
@@ -1122,7 +1125,8 @@ static void vexriscv_memory_cmd(struct target *target, uint32_t address,uint32_t
 	struct vexriscv_common *vexriscv = target_to_vexriscv(target);
 	struct jtag_tap *tap = target->tap;
 	struct scan_field field;
-	uint8_t cmd[10];
+	uint8_t cmd[20];
+    memset(cmd, 0, 20);
 
 	if(!vexriscv->useTCP) vexriscv_set_instr(target, vexriscv->jtagCmdInstruction);
 
@@ -1147,10 +1151,17 @@ static void vexriscv_memory_cmd(struct target *target, uint32_t address,uint32_t
 	}
     uint8_t write = read ? 0 : 1;
     uint32_t waitCycles = 0;
-	field.num_bits = 8+32+32+1+2+vexriscv->jtagCmdHeaderSize + waitCycles;
+    int32_t ignoreWidth = vexriscv->jtagCmdHeaderSize ? vexriscv->jtagCmdIgnoreSize - jtag_tap_count() + 1 : 0;
+	field.num_bits = 8+32+32+1+2 + vexriscv->jtagCmdHeaderSize + ignoreWidth + waitCycles;
 	field.out_value = cmd;
 	uint32_t offset = 0;
 
+	if(ignoreWidth < 0){
+	    LOG_ERROR("To support VexRiscv jtag header and multiple tap on the jtag chain, you need to provision more 'jtagIgnoreWidth'\n");
+        exit(1);
+	}
+
+	offset += ignoreWidth;
     bit_copy(cmd,offset,(uint8_t*)&vexriscv->jtagCmdHeader,0,vexriscv->jtagCmdHeaderSize); offset += vexriscv->jtagCmdHeaderSize;
 	bit_copy(cmd,offset,&inst,0,8); offset += 8 + waitCycles;
 	bit_copy(cmd,offset,(uint8_t*)&address,0,32); offset += 32;
@@ -1176,11 +1187,18 @@ static void vexriscv_read_rsp(struct target *target,uint8_t *value, uint32_t siz
 	struct vexriscv_common *vexriscv = target_to_vexriscv(target);
 	struct jtag_tap *tap = target->tap;
 	struct scan_field feilds[3];
-    uint8_t header[10];
-    bit_copy(header,0,(uint8_t*)&vexriscv->jtagRspHeader,0,vexriscv->jtagRspHeaderSize);
+    uint8_t header[20];
+    int32_t ignoreWidth = vexriscv->jtagRspHeaderSize ? vexriscv->jtagRspIgnoreSize - jtag_tap_count() + 1 : 0;
+    memset(header, 0, 20);
 
+    if(ignoreWidth < 0){
+        LOG_ERROR("To support VexRiscv jtag header and multiple tap on the jtag chain, you need to provision more 'jtagIgnoreWidth'\n");
+        exit(1);
+    }
 
-	feilds[0].num_bits = 2+vexriscv->jtagRspHeaderSize; //TODO !!!
+    bit_copy(header, ignoreWidth, (uint8_t*)&vexriscv->jtagRspHeader, 0, vexriscv->jtagRspHeaderSize);
+
+	feilds[0].num_bits = 2 + vexriscv->jtagRspHeaderSize + vexriscv->jtagRspIgnoreSize; //TODO !!!
 	feilds[0].out_value = header;
 	feilds[0].in_value = NULL;
 	feilds[0].check_value = NULL;
@@ -1952,7 +1970,7 @@ COMMAND_HANDLER(vexriscv_handle_readWaitCycles_command)
 
 COMMAND_HANDLER(vexriscv_handle_jtagMapping_command)
 {
-    if(CMD_ARGC != 6)
+    if(CMD_ARGC < 6)
         return ERROR_COMMAND_ARGUMENT_INVALID;
     struct target* target = get_current_target(CMD_CTX);
     struct vexriscv_common *vexriscv = target_to_vexriscv(target);
@@ -1962,6 +1980,12 @@ COMMAND_HANDLER(vexriscv_handle_jtagMapping_command)
     COMMAND_PARSE_NUMBER(u32, CMD_ARGV[3], vexriscv->jtagRspHeader);
     COMMAND_PARSE_NUMBER(u32, CMD_ARGV[4], vexriscv->jtagCmdHeaderSize);
     COMMAND_PARSE_NUMBER(u32, CMD_ARGV[5], vexriscv->jtagRspHeaderSize);
+    if(CMD_ARGC > 6){
+        if(CMD_ARGC < 8)
+            return ERROR_COMMAND_ARGUMENT_INVALID;
+        COMMAND_PARSE_NUMBER(u32, CMD_ARGV[6], vexriscv->jtagCmdIgnoreSize);
+        COMMAND_PARSE_NUMBER(u32, CMD_ARGV[7], vexriscv->jtagRspIgnoreSize);
+    }
     return ERROR_OK;
 }
 
@@ -2007,8 +2031,8 @@ static const struct command_registration vexriscv_exec_command_handlers[] = {
             .name = "jtagMapping",
             .handler = vexriscv_handle_jtagMapping_command,
             .mode = COMMAND_CONFIG,
-            .help = "Specify the JTAG instructions used for cmd/rsp transactions and their DR_SHIFT header, default 2 3 0 0 0 0",
-            .usage = "cmdInstruction rspInstruction cmdHeader rspHeader cmdHeaderSize rspHeaderSize",
+            .help = "Specify the JTAG instructions used for cmd/rsp transactions and their DR_SHIFT header, default 2 3 0 0 0 0 0 0",
+            .usage = "cmdInstruction rspInstruction cmdHeader rspHeader cmdHeaderSize rspHeaderSize [cmdIgnoreSize rspIgnoreSize]",
         },
 		{
 			.name = "readWaitCycles",
