@@ -30,6 +30,7 @@
 #include "config.h"
 #endif
 
+#include "adapter.h"
 #include "jtag.h"
 #include "swd.h"
 #include "minidriver.h"
@@ -469,6 +470,7 @@ static int jim_newtap_expected_id(struct jim_nvp *n, struct jim_getopt_info *goi
 #define NTAP_OPT_DISABLED  4
 #define NTAP_OPT_EXPECTED_ID 5
 #define NTAP_OPT_VERSION   6
+#define NTAP_OPT_BYPASS    7
 
 static int jim_newtap_ir_param(struct jim_nvp *n, struct jim_getopt_info *goi,
 	struct jtag_tap *tap)
@@ -531,6 +533,7 @@ static int jim_newtap_cmd(struct jim_getopt_info *goi)
 		{ .name = "-disable",       .value = NTAP_OPT_DISABLED },
 		{ .name = "-expected-id",       .value = NTAP_OPT_EXPECTED_ID },
 		{ .name = "-ignore-version",       .value = NTAP_OPT_VERSION },
+		{ .name = "-ignore-bypass",       .value = NTAP_OPT_BYPASS },
 		{ .name = NULL,       .value = -1 },
 	};
 
@@ -615,6 +618,9 @@ static int jim_newtap_cmd(struct jim_getopt_info *goi)
 			    break;
 		    case NTAP_OPT_VERSION:
 			    tap->ignore_version = true;
+			    break;
+		    case NTAP_OPT_BYPASS:
+			    tap->ignore_bypass = true;
 			    break;
 		}	/* switch (n->value) */
 	}	/* while (goi->argc) */
@@ -886,6 +892,7 @@ static const struct command_registration jtag_subcommand_handlers[] = {
 			"['-enable'|'-disable'] "
 			"['-expected_id' number] "
 			"['-ignore-version'] "
+			"['-ignore-bypass'] "
 			"['-ircapture' number] "
 			"['-mask' number]",
 	},
@@ -1040,13 +1047,13 @@ COMMAND_HANDLER(handle_jtag_rclk_command)
 		unsigned khz = 0;
 		COMMAND_PARSE_NUMBER(uint, CMD_ARGV[0], khz);
 
-		retval = jtag_config_rclk(khz);
+		retval = adapter_config_rclk(khz);
 		if (retval != ERROR_OK)
 			return retval;
 	}
 
-	int cur_khz = jtag_get_speed_khz();
-	retval = jtag_get_speed_readable(&cur_khz);
+	int cur_khz = adapter_get_speed_khz();
+	retval = adapter_get_speed_readable(&cur_khz);
 	if (retval != ERROR_OK)
 		return retval;
 

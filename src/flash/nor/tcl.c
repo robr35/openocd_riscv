@@ -731,7 +731,8 @@ COMMAND_HANDLER(handle_flash_md_command)
 
 	retval = flash_driver_read(bank, buffer, offset, sizebytes);
 	if (retval == ERROR_OK)
-		target_handle_md_output(CMD, target, address, wordsize, count, buffer);
+		target_handle_md_output(CMD, target, address, wordsize, count,
+				buffer, true);
 
 	free(buffer);
 
@@ -1284,8 +1285,7 @@ COMMAND_HANDLER(handle_flash_bank_command)
 
 	/* register flash specific commands */
 	if (driver->commands) {
-		int retval = register_commands(CMD_CTX, NULL,
-				driver->commands);
+		int retval = register_commands(CMD_CTX, NULL, driver->commands);
 		if (retval != ERROR_OK) {
 			LOG_ERROR("couldn't register '%s' commands",
 				driver_name);

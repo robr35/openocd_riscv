@@ -1024,10 +1024,10 @@ int lakemont_resume(struct target *t, int current, target_addr_t address,
 
 		/* if breakpoints are enabled, we need to redirect these into probe mode */
 		struct breakpoint *activeswbp = t->breakpoints;
-		while (activeswbp && activeswbp->set == 0)
+		while (activeswbp && !activeswbp->is_set)
 			activeswbp = activeswbp->next;
 		struct watchpoint *activehwbp = t->watchpoints;
-		while (activehwbp && activehwbp->set == 0)
+		while (activehwbp && !activehwbp->is_set)
 			activehwbp = activehwbp->next;
 		if (activeswbp || activehwbp)
 			buf_set_u32(x86_32->cache->reg_list[PMCR].value, 0, 32, 1);
@@ -1070,7 +1070,8 @@ int lakemont_step(struct target *t, int current,
 	LOG_DEBUG("EFLAGS [TF] [RF] bits set=0x%08" PRIx32 ", PMCR=0x%08" PRIx32 ", EIP=0x%08" PRIx32,
 			eflags, pmcr, eip);
 
-	tapstatus = get_tapstatus(t);
+	/* Returned value unused. Can this line be removed? */
+	get_tapstatus(t);
 
 	t->debug_reason = DBG_REASON_SINGLESTEP;
 	t->state = TARGET_DEBUG_RUNNING;
