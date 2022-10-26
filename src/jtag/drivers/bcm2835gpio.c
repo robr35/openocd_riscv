@@ -198,7 +198,7 @@ static int bcm2835gpio_speed(int speed)
 
 static int is_gpio_valid(int gpio)
 {
-	return gpio >= 0 && gpio <= 53;
+	return gpio >= 0 && gpio <= 31;
 }
 
 COMMAND_HANDLER(bcm2835gpio_handle_jtag_gpionums)
@@ -565,6 +565,13 @@ static int bcm2835gpio_init(void)
 	}
 
 	if (transport_is_swd()) {
+		/* Make buffer an output before the GPIO connected to it */
+		if (swdio_dir_gpio != -1) {
+			swdio_dir_gpio_mode = MODE_GPIO(swdio_dir_gpio);
+			GPIO_SET = 1 << swdio_dir_gpio;
+			OUT_GPIO(swdio_dir_gpio);
+		}
+
 		swclk_gpio_mode = MODE_GPIO(swclk_gpio);
 		swdio_gpio_mode = MODE_GPIO(swdio_gpio);
 
@@ -578,12 +585,6 @@ static int bcm2835gpio_init(void)
 		srst_gpio_mode = MODE_GPIO(srst_gpio);
 		GPIO_SET = 1 << srst_gpio;
 		OUT_GPIO(srst_gpio);
-	}
-
-	if (swdio_dir_gpio != -1) {
-		swdio_dir_gpio_mode = MODE_GPIO(swdio_dir_gpio);
-		GPIO_SET = 1 << swdio_dir_gpio;
-		OUT_GPIO(swdio_dir_gpio);
 	}
 
 	LOG_DEBUG("saved pinmux settings: tck %d tms %d tdi %d "

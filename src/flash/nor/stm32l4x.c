@@ -26,9 +26,10 @@
 #include "imp.h"
 #include <helper/align.h>
 #include <helper/binarybuffer.h>
+#include <helper/bits.h>
 #include <target/algorithm.h>
+#include <target/arm_adi_v5.h>
 #include <target/cortex_m.h>
-#include "bits.h"
 #include "stm32l4x.h"
 
 /* STM32L4xxx series for reference.
@@ -252,7 +253,6 @@ struct stm32l4_flash_bank {
 	uint32_t flash_regs_base;
 	const uint32_t *flash_regs;
 	bool otp_enabled;
-	bool use_flashloader;
 	enum stm32l4_rdp rdp;
 	bool tzen;
 	uint32_t optr;
@@ -619,7 +619,6 @@ FLASH_BANK_COMMAND_HANDLER(stm32l4_flash_bank_command)
 	stm32l4_info->probed = false;
 	stm32l4_info->otp_enabled = false;
 	stm32l4_info->user_bank_size = bank->size;
-	stm32l4_info->use_flashloader = true;
 
 	return ERROR_OK;
 }
@@ -1595,20 +1594,21 @@ static int stm32l4_write(struct flash_bank *bank, const uint8_t *buffer,
 	if (retval != ERROR_OK)
 		goto err_lock;
 
-	if (stm32l4_info->use_flashloader) {
-		/* For TrustZone enabled devices, when TZEN is set and RDP level is 0.5,
-		 * the debug is possible only in non-secure state.
-		 * Thus means the flashloader will run in non-secure mode,
-		 * and the workarea need to be in non-secure RAM */
-		if (stm32l4_info->tzen && (stm32l4_info->rdp == RDP_LEVEL_0_5))
-			LOG_INFO("RDP level is 0.5, the work-area should reside in non-secure RAM");
 
-		retval = stm32l4_write_block(bank, buffer, offset,
-				count / stm32l4_info->data_width);
-	}
+	/* For TrustZone enabled devices, when TZEN is set and RDP level is 0.5,
+	 * the debug is possible only in non-secure state.
+	 * Thus means the flashloader will run in non-secure mode,
+	 * and the workarea need to be in non-secure RAM */
+	if (stm32l4_info->tzen && (stm32l4_info->rdp == RDP_LEVEL_0_5))
+		LOG_WARNING("RDP = 0x55, the work-area should be in non-secure RAM (check SAU partitioning)");
 
-	if (!stm32l4_info->use_flashloader || retval == ERROR_TARGET_RESOURCE_NOT_AVAILABLE) {
-		LOG_INFO("falling back to single memory accesses");
+	/* first try to write using the loader, for better performance */
+	retval = stm32l4_write_block(bank, buffer, offset,
+			count / stm32l4_info->data_width);
+
+	/* if resources are not available write without a loader */
+	if (retval == ERROR_TARGET_RESOURCE_NOT_AVAILABLE) {
+		LOG_WARNING("falling back to programming without a flash loader (slower)");
 		retval = stm32l4_write_block_without_loader(bank, buffer, offset,
 				count / stm32l4_info->data_width);
 	}
@@ -1632,13 +1632,14 @@ err_lock:
 
 static int stm32l4_read_idcode(struct flash_bank *bank, uint32_t *id)
 {
-	int retval;
+	int retval = ERROR_OK;
+	struct target *target = bank->target;
 
 	/* try reading possible IDCODE registers, in the following order */
 	uint32_t dbgmcu_idcode[] = {DBGMCU_IDCODE_L4_G4, DBGMCU_IDCODE_G0, DBGMCU_IDCODE_L5};
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(dbgmcu_idcode); i++) {
-		retval = target_read_u32(bank->target, dbgmcu_idcode[i], id);
+		retval = target_read_u32(target, dbgmcu_idcode[i], id);
 		if ((retval == ERROR_OK) && ((*id & 0xfff) != 0) && ((*id & 0xfff) != 0xfff))
 			return ERROR_OK;
 	}
@@ -1647,12 +1648,16 @@ static int stm32l4_read_idcode(struct flash_bank *bank, uint32_t *id)
 	 * DBGMCU_IDCODE cannot be read using CPU1 (Cortex-M0+) at AP1,
 	 * to solve this read the UID64 (IEEE 64-bit unique device ID register) */
 
-	struct cortex_m_common *cortex_m = target_to_cm(bank->target);
+	struct armv7m_common *armv7m = target_to_armv7m_safe(target);
+	if (!armv7m) {
+		LOG_ERROR("Flash requires Cortex-M target");
+		return ERROR_TARGET_INVALID;
+	}
 
 	/* CPU2 (Cortex-M0+) is supported only with non-hla adapters because it is on AP1.
 	 * Using HLA adapters armv7m.debug_ap is null, and checking ap_num triggers a segfault */
-	if (cortex_m->core_info->partno == CORTEX_M0P_PARTNO &&
-			cortex_m->armv7m.debug_ap && cortex_m->armv7m.debug_ap->ap_num == 1) {
+	if (cortex_m_get_partno_safe(target) == CORTEX_M0P_PARTNO &&
+			armv7m->debug_ap && armv7m->debug_ap->ap_num == 1) {
 		uint32_t uid64_ids;
 
 		/* UID64 is contains
@@ -1662,7 +1667,7 @@ static int stm32l4_read_idcode(struct flash_bank *bank, uint32_t *id)
 		 *
 		 *  read only the fixed values {STID,DEVID} from UID64_IDS to identify the device as STM32WLx
 		 */
-		retval = target_read_u32(bank->target, UID64_IDS, &uid64_ids);
+		retval = target_read_u32(target, UID64_IDS, &uid64_ids);
 		if (retval == ERROR_OK && uid64_ids == UID64_IDS_STM32WL) {
 			/* force the DEV_ID to DEVID_STM32WLE_WL5XX and the REV_ID to unknown */
 			*id = DEVID_STM32WLE_WL5XX;
@@ -1700,10 +1705,20 @@ static const char *get_stm32l4_bank_type_str(struct flash_bank *bank)
 static int stm32l4_probe(struct flash_bank *bank)
 {
 	struct target *target = bank->target;
-	struct armv7m_common *armv7m = target_to_armv7m(target);
 	struct stm32l4_flash_bank *stm32l4_info = bank->driver_priv;
 	const struct stm32l4_part_info *part_info;
 	uint16_t flash_size_kb = 0xffff;
+
+	if (!target_was_examined(target)) {
+		LOG_ERROR("Target not examined yet");
+		return ERROR_TARGET_NOT_EXAMINED;
+	}
+
+	struct armv7m_common *armv7m = target_to_armv7m_safe(target);
+	if (!armv7m) {
+		LOG_ERROR("Flash requires Cortex-M target");
+		return ERROR_TARGET_INVALID;
+	}
 
 	stm32l4_info->probed = false;
 
@@ -1742,7 +1757,7 @@ static int stm32l4_probe(struct flash_bank *bank)
 	 * Ask the flash infrastructure to ensure required alignment */
 	bank->write_start_alignment = bank->write_end_alignment = stm32l4_info->data_width;
 
-	/* initialise the flash registers layout */
+	/* Initialize the flash registers layout */
 	if (part_info->flags & F_HAS_L5_FLASH_REGS)
 		stm32l4_info->flash_regs = stm32l5_ns_flash_regs;
 	else
@@ -1755,7 +1770,7 @@ static int stm32l4_probe(struct flash_bank *bank)
 
 	stm32l4_sync_rdp_tzen(bank);
 
-	/* for devices with trustzone, use flash secure registers when TZEN=1 and RDP is LEVEL_0 */
+	/* for devices with TrustZone, use flash secure registers when TZEN=1 and RDP is LEVEL_0 */
 	if (stm32l4_info->tzen && (stm32l4_info->rdp == RDP_LEVEL_0)) {
 		if (part_info->flags & F_HAS_L5_FLASH_REGS) {
 			stm32l4_info->flash_regs_base |= STM32L5_REGS_SEC_OFFSET;
@@ -1923,15 +1938,17 @@ static int stm32l4_probe(struct flash_bank *bank)
 		/* STM32L55/L56xx can be single/dual bank:
 		 *   if size = 512K check DBANK bit
 		 *   if size = 256K check DB256K bit
+		 *
+		 * default page size is 4kb, if DBANK = 1, the page size is 2kb.
 		 */
-		page_size_kb = 4;
+
+		page_size_kb = (stm32l4_info->optr & FLASH_L5_DBANK) ? 2 : 4;
 		num_pages = flash_size_kb / page_size_kb;
 		stm32l4_info->bank1_sectors = num_pages;
+
 		if ((is_max_flash_size && (stm32l4_info->optr & FLASH_L5_DBANK)) ||
 			(!is_max_flash_size && (stm32l4_info->optr & FLASH_L5_DB256))) {
 			stm32l4_info->dual_bank_mode = true;
-			page_size_kb = 2;
-			num_pages = flash_size_kb / page_size_kb;
 			stm32l4_info->bank1_sectors = num_pages / 2;
 		}
 		break;
@@ -2029,8 +2046,19 @@ static int stm32l4_auto_probe(struct flash_bank *bank)
 	if (stm32l4_info->probed) {
 		uint32_t optr_cur;
 
+		/* save flash_regs_base */
+		uint32_t saved_flash_regs_base = stm32l4_info->flash_regs_base;
+
+		/* for devices with TrustZone, use NS flash registers to read OPTR */
+		if (stm32l4_info->part_info->flags & F_HAS_L5_FLASH_REGS)
+			stm32l4_info->flash_regs_base &= ~STM32L5_REGS_SEC_OFFSET;
+
 		/* read flash option register and re-probe if optr value is changed */
 		int retval = stm32l4_read_flash_reg_by_index(bank, STM32_FLASH_OPTR_INDEX, &optr_cur);
+
+		/* restore saved flash_regs_base */
+		stm32l4_info->flash_regs_base = saved_flash_regs_base;
+
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -2264,26 +2292,6 @@ COMMAND_HANDLER(stm32l4_handle_trustzone_command)
 	return stm32l4_perform_obl_launch(bank);
 }
 
-COMMAND_HANDLER(stm32l4_handle_flashloader_command)
-{
-	if (CMD_ARGC < 1 || CMD_ARGC > 2)
-		return ERROR_COMMAND_SYNTAX_ERROR;
-
-	struct flash_bank *bank;
-	int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-	if (retval != ERROR_OK)
-		return retval;
-
-	struct stm32l4_flash_bank *stm32l4_info = bank->driver_priv;
-
-	if (CMD_ARGC == 2)
-		COMMAND_PARSE_ENABLE(CMD_ARGV[1], stm32l4_info->use_flashloader);
-
-	command_print(CMD, "FlashLoader usage is %s", stm32l4_info->use_flashloader ? "enabled" : "disabled");
-
-	return ERROR_OK;
-}
-
 COMMAND_HANDLER(stm32l4_handle_option_load_command)
 {
 	if (CMD_ARGC != 1)
@@ -2488,13 +2496,6 @@ static const struct command_registration stm32l4_exec_command_handlers[] = {
 		.mode = COMMAND_EXEC,
 		.usage = "bank_id",
 		.help = "Unlock entire protected flash device.",
-	},
-	{
-		.name = "flashloader",
-		.handler = stm32l4_handle_flashloader_command,
-		.mode = COMMAND_EXEC,
-		.usage = "<bank_id> [enable|disable]",
-		.help = "Configure the flashloader usage",
 	},
 	{
 		.name = "mass_erase",

@@ -27,6 +27,7 @@
 #include <helper/binarybuffer.h>
 #include <helper/time_support.h>
 #include <target/algorithm.h>
+#include <target/arm_adi_v5.h>
 #include <target/cortex_m.h>
 
 /* SI32_DEVICEID0 */
@@ -982,7 +983,7 @@ COMMAND_HANDLER(sim3x_lock)
 
 	if (!dap) {
 		/* Used debug interface doesn't support direct DAP access */
-		LOG_INFO("Target can't by unlocked by this debug interface");
+		LOG_INFO("Target can't be unlocked by this debug interface");
 
 		/* Core check */
 		ret = target_read_u32(target, CPUID, &val);

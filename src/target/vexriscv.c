@@ -1521,9 +1521,9 @@ static int vexriscv_add_breakpoint(struct target *target,
 {
 	uint32_t data;
 
-	LOG_DEBUG("Adding breakpoint: addr 0x%08" PRIx32 ", len %d, type %d, set: %d, id: %" PRId32,
+	LOG_DEBUG("Adding breakpoint: addr 0x%08" PRIx32 ", len %d, type %d, set: %u, id: %" PRId32,
 		  (uint32_t)breakpoint->address, breakpoint->length, breakpoint->type,
-		  breakpoint->set, breakpoint->unique_id);
+		  breakpoint->number, breakpoint->unique_id);
 
 	/* Only support SW breakpoints for now. */
 	if (breakpoint->type == BKPT_SOFT){
@@ -1590,7 +1590,7 @@ static int vexriscv_add_breakpoint(struct target *target,
 			LOG_INFO("no watchpoint unit available for hardware breakpoint");
 			return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 		}
-		breakpoint->set = freeId+1;
+		breakpoint_hw_set(breakpoint, freeId);
 		vexriscv->hardwareBreakpointUsed[freeId] = 1;
 		vexriscv_setHardwareBreakpoint(target, true, freeId, 1,breakpoint->address);
 	}
@@ -1601,9 +1601,9 @@ static int vexriscv_add_breakpoint(struct target *target,
 static int vexriscv_remove_breakpoint(struct target *target,
 				  struct breakpoint *breakpoint)
 {
-	LOG_DEBUG("Removing breakpoint: addr 0x%08" PRIx32 ", len %d, type %d, set: %d, id: %" PRId32,
+	LOG_DEBUG("Removing breakpoint: addr 0x%08" PRIx32 ", len %d, type %d, set: %u, id: %" PRId32,
 			(uint32_t)breakpoint->address, breakpoint->length, breakpoint->type,
-		  breakpoint->set, breakpoint->unique_id);
+		  breakpoint->number, breakpoint->unique_id);
 
 	/* Only support SW breakpoints for now. */
 	if (breakpoint->type == BKPT_SOFT){
@@ -1642,12 +1642,12 @@ static int vexriscv_remove_breakpoint(struct target *target,
 		}
 	} else {
 		struct vexriscv_common *vexriscv = target_to_vexriscv(target);
-		if (!breakpoint->set) {
+		if (!breakpoint->is_set) {
 			LOG_WARNING("breakpoint not set");
 			return ERROR_OK;
 		}
-		uint32_t freeId = breakpoint->set - 1;
-		breakpoint->set = 0;
+		uint32_t freeId = breakpoint->number;
+		breakpoint->is_set = false;
 		vexriscv->hardwareBreakpointUsed[freeId] = 0;
 		vexriscv_setHardwareBreakpoint(target, true, freeId, 0,breakpoint->address);
 	}

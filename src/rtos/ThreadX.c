@@ -112,18 +112,16 @@ static const struct stack_register_offset rtos_threadx_arm926ejs_stack_offsets_i
 
 static const struct rtos_register_stacking rtos_threadx_arm926ejs_stacking[] = {
 {
-	ARM926EJS_REGISTERS_SIZE_SOLICITED,	/* stack_registers_size */
-	-1,									/* stack_growth_direction */
-	17,									/* num_output_registers */
-	NULL,								/* stack_alignment */
-	rtos_threadx_arm926ejs_stack_offsets_solicited	/* register_offsets */
+	.stack_registers_size = ARM926EJS_REGISTERS_SIZE_SOLICITED,
+	.stack_growth_direction = -1,
+	.num_output_registers = 17,
+	.register_offsets = rtos_threadx_arm926ejs_stack_offsets_solicited
 },
 {
-	ARM926EJS_REGISTERS_SIZE_INTERRUPT,	/* stack_registers_size */
-	-1,									/* stack_growth_direction */
-	17,									/* num_output_registers */
-	NULL,								/* stack_alignment */
-	rtos_threadx_arm926ejs_stack_offsets_interrupt	/* register_offsets */
+	.stack_registers_size = ARM926EJS_REGISTERS_SIZE_INTERRUPT,
+	.stack_growth_direction = -1,
+	.num_output_registers = 17,
+	.register_offsets = rtos_threadx_arm926ejs_stack_offsets_interrupt
 },
 };
 
@@ -176,6 +174,18 @@ static const struct threadx_params threadx_params_list[] = {
 	2,									/* stacking_info_nb */
 	get_stacking_info_arm926ejs,		/* fn_get_stacking_info */
 	is_thread_id_valid_arm926ejs,		/* fn_is_thread_id_valid */
+	},
+	{
+	"hla_target",				/* target_name */
+	4,							/* pointer_width; */
+	8,							/* thread_stack_offset; */
+	40,							/* thread_name_offset; */
+	48,							/* thread_state_offset; */
+	136,						/* thread_next_offset */
+	&rtos_standard_cortex_m3_stacking,	/* stacking_info */
+	1,							/* stacking_info_nb */
+	NULL,						/* fn_get_stacking_info */
+	NULL,						/* fn_is_thread_id_valid */
 	},
 };
 
