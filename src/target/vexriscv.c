@@ -91,6 +91,13 @@ static const char *id_to_string(unsigned char id)
 	return "unknown";
 }
 
+struct VJTAGParams
+{
+	int vjtag_node_address;
+	int nb_nodes;
+	int m_width;
+};
+
 static unsigned char guess_addr_width(unsigned char number_of_nodes)
 {
 	unsigned char width = 0;
@@ -139,6 +146,8 @@ struct vexriscv_common {
     uint32_t jtagCmdHeader;
     uint32_t jtagCmdHeaderSize;
     uint32_t jtagCmdIgnoreSize;
+	bool useVJTAG;
+	struct VJTAGParams *vjtagParams;
 };
 
 static inline struct vexriscv_common *
