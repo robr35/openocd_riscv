@@ -44,6 +44,65 @@
 #define FALSE 0
 #define TRUE 1
 
+/* Contains constants relevant to the Altera Virtual JTAG
+ * device, which are not included in the BSDL.
+ * As of this writing, these are constant across every
+ * device which supports virtual JTAG.
+ */
+
+/* These are commands for the FPGA's IR. */
+#define ALTERA_CYCLONE_CMD_USER1 0x0E
+#define ALTERA_CYCLONE_CMD_USER0 0x0C
+
+/* These defines are for the virtual IR (not the FPGA's)
+ * The virtual TAP was defined in hardware to match the OpenCores native
+ * TAP in both IR size and DEBUG command.
+ */
+#define ALT_VJTAG_IR_SIZE 4
+#define ALT_VJTAG_CMD_DEBUG 0x8
+
+/* SLD node ID. */
+#define JTAG_TO_AVALON_NODE_ID 0x84
+#define VJTAG_NODE_ID 0x08
+#define SIGNAL_TAP_NODE_ID 0x00
+#define SERIAL_FLASH_LOADER_NODE_ID 0x04
+
+#define VER(x) ((x >> 27) & 0x1f)
+#define NB_NODES(x) ((x >> 19) & 0xff)
+#define ID(x) ((x >> 19) & 0xff)
+#define MANUF(x) ((x >> 8) & 0x7ff)
+#define M_WIDTH(x) ((x >> 0) & 0xff)
+#define INST_ID(x) ((x >> 0) & 0xff)
+
+// Some helper functions for VJTAG implementation
+static const char *id_to_string(unsigned char id)
+{
+	switch (id)
+	{
+	case VJTAG_NODE_ID:
+		return "Virtual JTAG";
+	case JTAG_TO_AVALON_NODE_ID:
+		return "JTAG to avalon bridge";
+	case SIGNAL_TAP_NODE_ID:
+		return "Signal TAP";
+	case SERIAL_FLASH_LOADER_NODE_ID:
+		return "Serial Flash Loader";
+	}
+	return "unknown";
+}
+
+static unsigned char guess_addr_width(unsigned char number_of_nodes)
+{
+	unsigned char width = 0;
+
+	while (number_of_nodes)
+	{
+		number_of_nodes >>= 1;
+		width++;
+	}
+
+	return width;
+}
 struct BusInfo{
 	uint32_t flushInstructionsSize;
 	uint32_t *flushInstructions;
