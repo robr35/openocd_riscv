@@ -486,13 +486,45 @@ static void vexriscv_set_instr(struct target *target, uint32_t new_instr)
 	struct jtag_tap *tap = target->tap;
 	if(!target->tap->bypass && buf_get_u32(target->tap->cur_instr, 0, target->tap->ir_length) == new_instr) return;
 	vexriscv->bridgeInstruction = new_instr;
-	field.num_bits = tap->ir_length;
-	uint8_t *t = calloc(DIV_ROUND_UP(field.num_bits, 8), 1);
-	field.out_value = t;
-	buf_set_u32(t, 0, field.num_bits, new_instr);
-	field.in_value = NULL;
-	jtag_add_ir_scan(tap, &field, TAP_IDLE);
-	free(t);
+
+	if (vexriscv->useVJTAG)
+	{
+		uint8_t t[4] = {0};
+
+		// If using VJTAG an IR must be converted to a VIR like so
+
+		/* Select VIR */
+		buf_set_u32(t, 0, tap->ir_length, ALTERA_CYCLONE_CMD_USER1);
+		field.num_bits = tap->ir_length;
+		field.out_value = t;
+		field.in_value = NULL;
+		jtag_add_ir_scan(tap, &field, TAP_IDLE);
+
+		/* Send the DEBUG command to the VJTAG IR */
+		int dr_length = guess_addr_width(vexriscv->vjtagParams->nb_nodes) + vexriscv->vjtagParams->m_width;
+		buf_set_u32(t, 0, dr_length, (vexriscv->vjtagParams->vjtag_node_address << vexriscv->vjtagParams->m_width) | new_instr);
+		field.num_bits = dr_length;
+		field.out_value = t;
+		field.in_value = NULL;
+		jtag_add_dr_scan(tap, 1, &field, TAP_IDLE);
+
+		/* Select the VJTAG DR */
+		buf_set_u32(t, 0, tap->ir_length, ALTERA_CYCLONE_CMD_USER0);
+		field.num_bits = tap->ir_length;
+		field.out_value = t;
+		field.in_value = NULL;
+		jtag_add_ir_scan(tap, &field, TAP_IDLE);
+	}
+	else
+	{
+		field.num_bits = tap->ir_length;
+		uint8_t *t = calloc(DIV_ROUND_UP(field.num_bits, 8), 1);
+		field.out_value = t;
+		buf_set_u32(t, 0, field.num_bits, new_instr);
+		field.in_value = NULL;
+		jtag_add_ir_scan(tap, &field, TAP_IDLE);
+		free(t);
+	}
 }
 
 static void vexriscv_yaml_ignore_block(yaml_parser_t *parser){
