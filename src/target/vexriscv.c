@@ -1863,7 +1863,7 @@ static int vexriscv_examine(struct target *target)
 	if (!target_was_examined(target)) {
 
 		target_set_examined(target);
-		
+
 		// initalise the VJTAG (code directly from or1k_tap_vjtag.c)
 		if (vexriscv->useVJTAG)
 		{
@@ -2325,6 +2325,18 @@ COMMAND_HANDLER(vexriscv_handle_networkProtocol_command)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(vexriscv_handle_useVjtag_command)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+
+	struct target *target = get_current_target(CMD_CTX);
+	struct vexriscv_common *vexriscv = target_to_vexriscv(target);
+	COMMAND_PARSE_BOOL(CMD_ARGV[0], vexriscv->useVJTAG, "true", "false");
+
+	return ERROR_OK;
+}
+
 static const struct command_registration vexriscv_exec_command_handlers[] = {
         {
             .name = "jtagMapping",
@@ -2357,6 +2369,13 @@ static const struct command_registration vexriscv_exec_command_handlers[] = {
 			.mode = COMMAND_CONFIG,
 			.help = "Network protocol to use (iverilog, etherbone)",
 			.usage = "iverilog,etherbone",
+		},
+		{
+		.name = "useVjtag",
+		.handler = vexriscv_handle_useVjtag_command,
+		.mode = COMMAND_CONFIG,
+		.help = "Use Intel VJTAG instead of JTAG, used for Altera FPGAs (VexRiscV must be configured to use VJTAG)",
+		.usage = "true/false",
 		},
 	COMMAND_REGISTRATION_DONE
 };
