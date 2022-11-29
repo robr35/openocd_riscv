@@ -34,8 +34,10 @@
 #include <helper/binarybuffer.h>
 #include <target/algorithm.h>
 #include <target/target.h>
+#include <target/target_type.h>
 #include <helper/command.h>
 #include <math.h>
+#include <string.h>
 
 typedef struct  {
 	uint32_t ctrlAddress;
@@ -303,6 +305,10 @@ static void vexriscv_nor_spi_spiClearStatus(struct flash_bank *bank){
 	vexriscv_nor_spi_spiStop(bank);
 }
 
+
+static char* vexriscv_args[] = {"x10","x11","x12","x13"};
+static char* riscv_args[]    = {"a0","a1","a2","a3"};
+
 #include "vexriscv_algo/vexriscv_nor_spi_write.h"
 int vexriscv_nor_spi_write(struct flash_bank *bank, const uint8_t *buffer, uint32_t offset, uint32_t count){
 	uint32_t end = offset + count;
@@ -316,7 +322,7 @@ int vexriscv_nor_spi_write(struct flash_bank *bank, const uint8_t *buffer, uint3
 	}
 	uint32_t ramAddress = workArea->address;
 	uint32_t codeAddress = ramAddress + burstMax;
-
+	char** rpNames = strcmp(bank->target->type->name, "riscv") == 0 ? riscv_args : vexriscv_args;
 
 	target_write_buffer(bank->target, codeAddress, vexriscv_nor_spi_write_bin_len, vexriscv_nor_spi_write_bin);
 
@@ -330,14 +336,13 @@ int vexriscv_nor_spi_write(struct flash_bank *bank, const uint8_t *buffer, uint3
 		mp[0].direction = PARAM_OUT;
 		struct reg_param rp[4];
 		uint32_t rpValues[] = {priv->ctrlAddress, offset, burstSize, ramAddress};
-		char* rpNames[] = {"x10","x11","x12","x13"};
 		for(int i = 0;i < 4;i ++){
 			rp[i].reg_name = rpNames[i];
 			rp[i].value = (uint8_t*)&rpValues[i];
 			rp[i].size = 32;
 			rp[i].direction = PARAM_OUT;
 		}
-		target_run_algorithm(bank->target, 1,mp,4,rp, codeAddress, -1, 2000, NULL);
+		target_run_algorithm(bank->target, 1,mp,4,rp, codeAddress, 0, 2000, NULL);
 		buffer += burstSize;
 		offset = offsetNext;
 	}
@@ -365,6 +370,7 @@ int vexriscv_nor_spi_read(struct flash_bank *bank, uint8_t *buffer, uint32_t off
 	}
 	uint32_t ramAddress = workArea->address;
 	uint32_t codeAddress = ramAddress + burstMax;
+	char** rpNames = strcmp(bank->target->type->name, "riscv") == 0 ? riscv_args : vexriscv_args;
 
 	target_write_buffer(bank->target, codeAddress, vexriscv_nor_spi_read_bin_len, vexriscv_nor_spi_read_bin);
 
@@ -378,7 +384,6 @@ int vexriscv_nor_spi_read(struct flash_bank *bank, uint8_t *buffer, uint32_t off
 		mp[0].direction = PARAM_IN;
 		struct reg_param rp[4];
 		uint32_t rpValues[] = {priv->ctrlAddress, offset, burstSize,  ramAddress};
-		char* rpNames[] = {"x10","x11","x12","x13"};
 		for(int i = 0;i < 4;i ++){
 			rp[i].reg_name = rpNames[i];
 			rp[i].value = (uint8_t*)&rpValues[i];
@@ -386,7 +391,7 @@ int vexriscv_nor_spi_read(struct flash_bank *bank, uint8_t *buffer, uint32_t off
 			rp[i].direction = PARAM_OUT;
 		}
 
-		target_run_algorithm(bank->target, 1,mp,4,rp, codeAddress, -1, 2000, NULL);
+		target_run_algorithm(bank->target, 1,mp,4,rp, codeAddress, 0, 2000, NULL);
 		buffer += burstSize;
 		offset = offsetNext;
 	}
