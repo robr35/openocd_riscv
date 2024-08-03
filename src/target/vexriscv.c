@@ -207,6 +207,7 @@ struct vexriscv_reg_mapping {
 
 #include "vexriscv-csrs.h"
 
+static int vexriscv_flush_input_buffer(struct target *target);
 static int vexriscv_semihosting_setup(struct target *target, int enable);
 static int vexriscv_semihosting_post_result(struct target *target);
 
@@ -1862,6 +1863,11 @@ static int vexriscv_examine(struct target *target)
 
 	if (!target_was_examined(target)) {
 
+		/* Flush any incoming bytes on initial connection
+		 * For example; litex_server sends a server info packet which causes a loss of sync
+		 */
+		vexriscv_flush_input_buffer(target);
+
 		target_set_examined(target);
 
 		// initalise the VJTAG (code directly from or1k_tap_vjtag.c)
@@ -2253,6 +2259,37 @@ int vexriscv_run_algorithm(struct target *target, int num_mem_params,
 	}
 
 	return ERROR_OK;
+}
+
+static int vexriscv_flush_input_buffer(struct target *target)
+{
+
+	/* Trigger a write which opens the socket */
+	struct vexriscv_common *vexriscv = target_to_vexriscv(target);
+	vexriscv_memory_cmd(target, vexriscv->dbgBase, 0, 4, 1);
+	vexriscv_execute_jtag_queue(target);
+
+	/* Set socket to non-blocking so bytes can be read without hanging if none are available */
+	int flags = fcntl(vexriscv->clientSocket, F_GETFL, 0);
+	assert(flags != -1);
+	fcntl(vexriscv->clientSocket, F_SETFL, flags | O_NONBLOCK);
+
+	/* Read any pending bytes */
+	uint8_t flush_buffer[1];
+	uint8_t ret = 1;
+	uint16_t flushed = 0;
+	while (ret == 1) {
+		ret = read(vexriscv->clientSocket, flush_buffer, 1);
+		if (ret == 1) {
+			flushed += 1;
+			LOG_DEBUG("Read a byte: %d, total: %d, ret: %d", flush_buffer[0], flushed, ret);
+		}
+	}
+
+	/* Reset the socket to blocking mode */
+	fcntl(vexriscv->clientSocket, F_SETFL, flags);
+
+	LOG_DEBUG("flushed %d incoming bytes\n", flushed);
 }
 
 
